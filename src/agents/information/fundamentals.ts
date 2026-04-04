@@ -31,17 +31,17 @@ export async function runFundamentalsAgent(): Promise<void> {
   const startTime = Date.now();
 
   try {
-    const provider = process.env.MODEL_SYNTHESIS_PROVIDER ?? process.env.MODEL_PROVIDER ?? 'anthropic';
+    const provider = getProviderName('discovery');
     const userPrompt = `Current date: ${new Date().toISOString().slice(0, 10)}\n\nSearch for upcoming earnings and fundamental catalysts for the XYZ stock universe.`;
     const result = await withRetry(
       () => generateText({
-        model: getModel('synthesis'),
-        providerOptions: mergeProviderOptions(getCacheProviderOptions('synthesis', getProviderName('synthesis'))),
+        model: getModel('discovery'),
+        providerOptions: mergeProviderOptions(getCacheProviderOptions('discovery', provider)),
         output: Output.object({ schema: FundamentalsSignalSchema }),
         tools: getWebToolsForProvider(provider),
         stopWhen: stepCountIs(20),
         messages: [
-          ...cachedSystemPrompt(PROMPT, getProviderName('synthesis')),
+          ...cachedSystemPrompt(PROMPT, provider),
           { role: 'user' as const, content: userPrompt },
         ],
       }),
@@ -62,7 +62,7 @@ export async function runFundamentalsAgent(): Promise<void> {
 
     logLLMCall({
       cycleId: 'layer1-fundamentals',
-      model: getModelLabel('synthesis'),
+      model: getModelLabel('discovery'),
       systemPrompt: PROMPT,
       userPrompt,
       response: signal,
@@ -72,7 +72,6 @@ export async function runFundamentalsAgent(): Promise<void> {
       toolCalls: extractToolCalls(result),
     });
   } catch (e: any) {
-    // Don't let fundamentals failure crash the system — it's supplementary data
     log({ level: 'warn', event: 'fundamentals_failed', data: { error: e.message } });
   }
 }

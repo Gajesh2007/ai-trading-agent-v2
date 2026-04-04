@@ -42,19 +42,8 @@ export function cachedSystemPrompt(
     }];
   }
 
-  if (provider === 'openrouter') {
-    // OpenRouter passes cache_control to underlying provider (Gemini, Anthropic, etc.)
-    return [{
-      role: 'system' as const,
-      content: [{
-        type: 'text',
-        text: systemPrompt,
-        cache_control: { type: 'ephemeral' },
-      }] as any,
-    }];
-  }
-
-  // OpenAI: automatic caching for >1024 tokens, no special config needed
+  // OpenAI: automatic caching for >1024 tokens
+  // OpenRouter/Gemini: implicit caching, no explicit config needed via AI SDK
   return [{
     role: 'system' as const,
     content: systemPrompt,
