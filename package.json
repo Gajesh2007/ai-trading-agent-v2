@@ -1,0 +1,26 @@
+{
+  "name": "trading-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "latest",
+    "@ai-sdk/devtools": "^0.0.15",
+    "@ai-sdk/openai": "latest",
+    "@nktkas/hyperliquid": "latest",
+    "@openrouter/ai-sdk-provider": "latest",
+    "ai": "^6.0.0",
+    "dotenv": "^16.0.0",
+    "viem": "^2.47.10",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "^5.5.0"
+  }
+}

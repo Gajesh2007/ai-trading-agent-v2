@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+logs
+workspace/state/*.json
+workspace/state/*.jsonl
+workspace/state/signal-cache
+.git

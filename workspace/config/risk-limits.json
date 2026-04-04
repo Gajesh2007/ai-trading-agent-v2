@@ -1,0 +1,5 @@
+{
+  "circuitBreakerEquity": 50,
+  "startingCapital": 200,
+  "notes": "The LLM has full discretion over sizing, leverage, and position count. The circuit breaker is the only hard constraint — it protects the experiment, not the LLM's judgment. Everything else is the LLM's call, logged via riskReasoning for meta-analysis."
+}
