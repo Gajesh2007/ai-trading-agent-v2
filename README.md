@@ -2,6 +2,12 @@
 
 A fully autonomous multi-model trading harness that discovers, evaluates, and executes trades on [Hyperliquid](https://hyperliquid.xyz) perpetual futures by finding divergences between prediction market odds and asset pricing.
 
+## Architecture
+
+<p align="center">
+  <img src="docs/architecture.svg" alt="Architecture Diagram" width="700"/>
+</p>
+
 ## How It Works
 
 The system runs 7 concurrent loops:
