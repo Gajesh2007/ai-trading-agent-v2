@@ -1,5 +1,6 @@
 import { generateText, Output } from 'ai';
-import { getModel, getModelLabel } from '../../model-router.js';
+import { getModel, getModelLabel, getProviderName } from '../../model-router.js';
+import { cachedSystemPrompt, getCacheProviderOptions, mergeProviderOptions } from '../../utils/cache.js';
 import { TechnicalContextSignalSchema } from '../../schemas/signals.js';
 import { writeSignalCache } from '../../state/manager.js';
 import { log, logLLMCall, extractToolCalls } from '../../logger.js';
@@ -34,9 +35,12 @@ export async function runTechnicalContextAgent(): Promise<void> {
   const result = await withRetry(
     () => generateText({
       model: getModel('discovery'),
+      providerOptions: mergeProviderOptions(getCacheProviderOptions('discovery', getProviderName('discovery'))),
       output: Output.object({ schema: TechnicalContextSignalSchema }),
-      system: PROMPT,
-      prompt: userPrompt,
+      messages: [
+        ...cachedSystemPrompt(PROMPT, getProviderName('discovery')),
+        { role: 'user' as const, content: userPrompt },
+      ],
     }),
     { label: 'technical-context-agent', maxAttempts: 2 },
   );

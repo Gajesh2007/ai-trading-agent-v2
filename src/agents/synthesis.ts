@@ -1,6 +1,7 @@
 import { generateText, Output, stepCountIs } from 'ai';
 import { randomUUID } from 'crypto';
-import { getModel, getModelLabel, getProviderOptions } from '../model-router.js';
+import { getModel, getModelLabel, getProviderOptions, getProviderName } from '../model-router.js';
+import { cachedSystemPrompt, getCacheProviderOptions, mergeProviderOptions } from '../utils/cache.js';
 import { ThesisGenerationOutputSchema, type ThesisGenerationOutput, type Thesis } from '../schemas/thesis.js';
 import { synthesisToolset } from '../tools/index.js';
 import type { DiscoveryCandidate } from '../schemas/discovery.js';
@@ -84,12 +85,14 @@ Evaluate this candidate. Should we trade it? If yes, produce a full thesis.`;
   const result = await withRetry(
     () => generateText({
       model: getModel('synthesis'),
-      providerOptions: getProviderOptions('synthesis'),
+      providerOptions: mergeProviderOptions(getProviderOptions('synthesis'), getCacheProviderOptions('synthesis', getProviderName('synthesis'))),
       output: Output.object({ schema: ThesisGenerationOutputSchema }),
       tools: synthesisToolset,
       stopWhen: stepCountIs(100),
-      system: SYSTEM_PROMPT,
-      prompt,
+      messages: [
+        ...cachedSystemPrompt(SYSTEM_PROMPT, getProviderName('synthesis')),
+        { role: 'user' as const, content: prompt },
+      ],
     }),
     { label: 'synthesis-llm', maxAttempts: 2 },
   );

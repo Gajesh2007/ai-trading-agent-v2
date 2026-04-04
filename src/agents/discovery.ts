@@ -1,7 +1,8 @@
 import { generateText, Output, stepCountIs } from 'ai';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
-import { getModel, getModelLabel } from '../model-router.js';
+import { getModel, getModelLabel, getProviderName } from '../model-router.js';
+import { cachedSystemPrompt, getCacheProviderOptions, mergeProviderOptions } from '../utils/cache.js';
 import { DiscoveryCandidateSchema } from '../schemas/discovery.js';
 import type { DiscoveryOutput } from '../schemas/discovery.js';
 import { discoveryToolset } from '../tools/index.js';
@@ -132,8 +133,11 @@ export async function runDiscoveryScanner(ctx: DiscoveryContext): Promise<Discov
       output: Output.object({ schema: LLMOutputSchema }),
       tools: discoveryToolset,
       stopWhen: stepCountIs(100),
-      system: SYSTEM_PROMPT,
-      prompt: userPrompt,
+      providerOptions: mergeProviderOptions(getCacheProviderOptions('discovery', getProviderName())),
+      messages: [
+        ...cachedSystemPrompt(SYSTEM_PROMPT, getProviderName()),
+        { role: 'user' as const, content: userPrompt },
+      ],
     }),
     { label: 'discovery-llm', maxAttempts: 2 },
   );

@@ -1,5 +1,6 @@
 import { generateText, Output, stepCountIs } from 'ai';
-import { getModel, getModelLabel, getProviderOptions } from '../model-router.js';
+import { getModel, getModelLabel, getProviderOptions, getProviderName } from '../model-router.js';
+import { cachedSystemPrompt, getCacheProviderOptions, mergeProviderOptions } from '../utils/cache.js';
 import { JuryAnalysisSchema, EvaluatorVerdictSchema, type JuryAnalysis, type EvaluatorVerdict, type JuryResult } from '../schemas/evaluation.js';
 import { analystToolset, evaluatorToolset } from '../tools/index.js';
 import type { DiscoveryCandidate } from '../schemas/discovery.js';
@@ -105,12 +106,14 @@ export async function runJury(
       withRetry(
         () => generateText({
           model: getModel(role),
-          providerOptions: getProviderOptions(role),
+          providerOptions: mergeProviderOptions(getProviderOptions(role), getCacheProviderOptions(role, getProviderName(role))),
           output: Output.object({ schema: z.object({ analysis: JuryAnalysisSchema }) }),
           tools: analystToolset(role),
           stopWhen: stepCountIs(100),
-          system: ANALYST_PROMPT,
-          prompt,
+          messages: [
+            ...cachedSystemPrompt(ANALYST_PROMPT, getProviderName(role)),
+            { role: 'user' as const, content: prompt },
+          ],
         }),
         { label: `jury-${role}`, maxAttempts: 2 },
       )
@@ -220,12 +223,14 @@ Grade this proposal and render your verdict.`;
   const result = await withRetry(
     () => generateText({
       model: getModel('evaluator'),
-      providerOptions: getProviderOptions('evaluator'),
+      providerOptions: mergeProviderOptions(getProviderOptions('evaluator'), getCacheProviderOptions('evaluator', getProviderName('evaluator'))),
       output: Output.object({ schema: EvaluatorVerdictSchema }),
       tools: evaluatorToolset,
       stopWhen: stepCountIs(100),
-      system: EVALUATOR_PROMPT,
-      prompt,
+      messages: [
+        ...cachedSystemPrompt(EVALUATOR_PROMPT, getProviderName('evaluator')),
+        { role: 'user' as const, content: prompt },
+      ],
     }),
     { label: 'evaluator-llm', maxAttempts: 2 },
   );

@@ -1,6 +1,7 @@
 import { generateText, Output, stepCountIs } from 'ai';
 import { z } from 'zod';
-import { getModel, getModelLabel, getProviderOptions } from '../model-router.js';
+import { getModel, getModelLabel, getProviderOptions, getProviderName } from '../model-router.js';
+import { cachedSystemPrompt, getCacheProviderOptions, mergeProviderOptions } from '../utils/cache.js';
 import { discoveryToolset } from '../tools/index.js';
 import { log, logLLMCall, extractToolCalls } from '../logger.js';
 import { withRetry } from '../utils/retry.js';
@@ -53,12 +54,14 @@ Investigate this anomaly. What's driving it? Is it temporary or structural? Whic
     const result = await withRetry(
       () => generateText({
         model: getModel('synthesis'),
-        providerOptions: getProviderOptions('synthesis'),
+        providerOptions: mergeProviderOptions(getProviderOptions('synthesis'), getCacheProviderOptions('synthesis', getProviderName('synthesis'))),
         output: Output.object({ schema: InvestigationSchema }),
         tools: discoveryToolset,
         stopWhen: stepCountIs(100),
-        system: investigationSystemPrompt,
-        prompt: investigationUserPrompt,
+        messages: [
+          ...cachedSystemPrompt(investigationSystemPrompt, getProviderName('synthesis')),
+          { role: 'user' as const, content: investigationUserPrompt },
+        ],
       }),
       { label: 'investigation-subagent', maxAttempts: 2 },
     );
@@ -130,12 +133,14 @@ These analysts disagree. Investigate what each is seeing. Form your own independ
     const result = await withRetry(
       () => generateText({
         model: getModel('evaluator'),
-        providerOptions: getProviderOptions('evaluator'),
+        providerOptions: mergeProviderOptions(getProviderOptions('evaluator'), getCacheProviderOptions('evaluator', getProviderName('evaluator'))),
         output: Output.object({ schema: DevilsAdvocateSchema }),
         tools: discoveryToolset,
         stopWhen: stepCountIs(100),
-        system: devilsAdvocateSystemPrompt,
-        prompt: devilsAdvocateUserPrompt,
+        messages: [
+          ...cachedSystemPrompt(devilsAdvocateSystemPrompt, getProviderName('evaluator')),
+          { role: 'user' as const, content: devilsAdvocateUserPrompt },
+        ],
       }),
       { label: 'devils-advocate', maxAttempts: 2 },
     );

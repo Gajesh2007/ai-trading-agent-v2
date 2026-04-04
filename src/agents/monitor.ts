@@ -1,5 +1,6 @@
 import { generateText, Output, stepCountIs } from 'ai';
-import { getModel, getModelLabel, getProviderOptions } from '../model-router.js';
+import { getModel, getModelLabel, getProviderOptions, getProviderName } from '../model-router.js';
+import { cachedSystemPrompt, getCacheProviderOptions, mergeProviderOptions } from '../utils/cache.js';
 import { monitorToolset, exitEvaluatorToolset } from '../tools/index.js';
 import { ValidationResultSchema, ExitDecisionSchema, type ValidationResult, type ExitDecision } from '../schemas/position.js';
 import type { Thesis } from '../schemas/thesis.js';
@@ -108,11 +109,14 @@ Check each falsification condition. Score the thesis validity. Recommend HOLD, R
   const result = await withRetry(
     () => generateText({
       model: getModel('thesisValidator'),
+      providerOptions: mergeProviderOptions(getProviderOptions('thesisValidator'), getCacheProviderOptions('thesisValidator', getProviderName('thesisValidator'))),
       output: Output.object({ schema: ValidationResultSchema }),
       tools: monitorToolset,
       stopWhen: stepCountIs(100),
-      system: VALIDATOR_PROMPT,
-      prompt,
+      messages: [
+        ...cachedSystemPrompt(VALIDATOR_PROMPT, getProviderName('thesisValidator')),
+        { role: 'user' as const, content: prompt },
+      ],
     }),
     { label: 'thesis-validator-llm', maxAttempts: 2 },
   );
@@ -191,12 +195,14 @@ Do you agree with the monitoring agent's assessment? Override if the cheap model
   const result = await withRetry(
     () => generateText({
       model: getModel('exitEvaluator'),
-      providerOptions: getProviderOptions('exitEvaluator'),
+      providerOptions: mergeProviderOptions(getProviderOptions('exitEvaluator'), getCacheProviderOptions('exitEvaluator', getProviderName('exitEvaluator'))),
       output: Output.object({ schema: ExitDecisionSchema }),
       tools: exitEvaluatorToolset,
       stopWhen: stepCountIs(100),
-      system: EXIT_EVALUATOR_PROMPT,
-      prompt,
+      messages: [
+        ...cachedSystemPrompt(EXIT_EVALUATOR_PROMPT, getProviderName('exitEvaluator')),
+        { role: 'user' as const, content: prompt },
+      ],
     }),
     { label: 'exit-evaluator-llm', maxAttempts: 2 },
   );

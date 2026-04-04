@@ -1,5 +1,6 @@
 import { generateText, Output, stepCountIs } from 'ai';
-import { getModel, getModelLabel } from '../../model-router.js';
+import { getModel, getModelLabel, getProviderName } from '../../model-router.js';
+import { cachedSystemPrompt, getCacheProviderOptions, mergeProviderOptions } from '../../utils/cache.js';
 import { FundamentalsSignalSchema } from '../../schemas/signals.js';
 import { writeSignalCache } from '../../state/manager.js';
 import { log, logLLMCall, extractToolCalls } from '../../logger.js';
@@ -35,11 +36,14 @@ export async function runFundamentalsAgent(): Promise<void> {
     const result = await withRetry(
       () => generateText({
         model: getModel('synthesis'),
+        providerOptions: mergeProviderOptions(getCacheProviderOptions('synthesis', getProviderName('synthesis'))),
         output: Output.object({ schema: FundamentalsSignalSchema }),
         tools: getWebToolsForProvider(provider),
         stopWhen: stepCountIs(20),
-        system: PROMPT,
-        prompt: userPrompt,
+        messages: [
+          ...cachedSystemPrompt(PROMPT, getProviderName('synthesis')),
+          { role: 'user' as const, content: userPrompt },
+        ],
       }),
       { label: 'fundamentals-agent', maxAttempts: 2 },
     );

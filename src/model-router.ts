@@ -78,6 +78,11 @@ export function getProviderOptions(role: ModelRole = 'discovery'): Record<string
   return undefined;
 }
 
+export function getProviderName(role: ModelRole = 'discovery'): 'anthropic' | 'openai' | 'openrouter' {
+  const { provider } = resolveProviderAndId(role);
+  return provider as 'anthropic' | 'openai' | 'openrouter';
+}
+
 export function getModelLabel(role: ModelRole = 'discovery'): string {
   const { provider, id } = resolveProviderAndId(role);
   const effort = MAX_EFFORT_ROLES.has(role)

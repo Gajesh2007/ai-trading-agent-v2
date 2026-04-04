@@ -1,7 +1,8 @@
 import { generateText, Output, stepCountIs } from 'ai';
 import { metaAnalysisToolset } from '../tools/index.js';
 import { z } from 'zod';
-import { getModel, getModelLabel, getProviderOptions } from '../model-router.js';
+import { getModel, getModelLabel, getProviderOptions, getProviderName } from '../model-router.js';
+import { cachedSystemPrompt, getCacheProviderOptions, mergeProviderOptions } from '../utils/cache.js';
 import { readTradeDecisions, readTheses, readPositions } from '../state/manager.js';
 import { log, logLLMCall, extractToolCalls } from '../logger.js';
 import { withRetry } from '../utils/retry.js';
@@ -87,12 +88,14 @@ Analyze the above data and produce a comprehensive meta-analysis report.`;
   const result = await withRetry(
     () => generateText({
       model: getModel('metaAnalysis'),
-      providerOptions: getProviderOptions('metaAnalysis'),
+      providerOptions: mergeProviderOptions(getProviderOptions('metaAnalysis'), getCacheProviderOptions('metaAnalysis', getProviderName('metaAnalysis'))),
       output: Output.object({ schema: ReportSchema }),
       tools: metaAnalysisToolset,
       stopWhen: stepCountIs(100),
-      system: SYSTEM_PROMPT,
-      prompt,
+      messages: [
+        ...cachedSystemPrompt(SYSTEM_PROMPT, getProviderName('metaAnalysis')),
+        { role: 'user' as const, content: prompt },
+      ],
     }),
     { label: 'meta-analysis-llm', maxAttempts: 2 },
   );
