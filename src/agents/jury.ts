@@ -1,12 +1,12 @@
 import { generateText, Output, stepCountIs } from 'ai';
 import { getModel, getModelLabel, getProviderOptions, getProviderName } from '../model-router.js';
-import { cachedSystemPrompt, getCacheProviderOptions, mergeProviderOptions } from '../utils/cache.js';
 import { JuryAnalysisSchema, EvaluatorVerdictSchema, type JuryAnalysis, type EvaluatorVerdict, type JuryResult } from '../schemas/evaluation.js';
 import { analystToolset, evaluatorToolset } from '../tools/index.js';
 import type { DiscoveryCandidate } from '../schemas/discovery.js';
 import type { DiscoveryContext } from '../context/context-bus.js';
 import { log, logLLMCall, extractToolCalls } from '../logger.js';
 import { readTradeDecisions, getActiveTheses } from '../state/manager.js';
+import { cachedSystemPrompt, getCacheProviderOptions, mergeProviderOptions } from '../utils/cache.js';
 import { withRetry } from '../utils/retry.js';
 import { z } from 'zod';
 
@@ -28,7 +28,13 @@ const ANALYST_PROMPT = `You are an independent analyst on a trading jury. You re
 - **getTradeHistory**: Review past trade outcomes for calibration.
 - **getRecentRejections**: Check what was recently rejected and why — avoid repeating failed theses.
 - **getPastDecisions**: See full decision history with outcomes.
-- **runSimulation**: Run Python code for quantitative analysis (expected value, Kelly criterion, etc.).`;
+- **runSimulation**: Run Python code for quantitative analysis (expected value, Kelly criterion, etc.).
+
+## When you receive evaluator feedback
+If the evaluator sends your analysis back with specific concerns, you MUST address each point directly. Either:
+1. Change your recommendation based on their valid criticism, OR
+2. Counter their argument with NEW evidence (web search, simulation, fresh data)
+Do NOT just restate your original position — that wastes everyone's time.`;
 
 const EVALUATOR_PROMPT = `You are a senior risk officer reviewing trade proposals from an analyst team. You are a SKEPTIC by nature. Your job is to find holes in their reasoning.
 
@@ -46,12 +52,12 @@ const EVALUATOR_PROMPT = `You are a senior risk officer reviewing trade proposal
 
 ## Decision Framework
 
-APPROVE: All criteria score ≥7/10, no red flags, weighted score ≥7.0
-SEND_BACK: Any criterion scores <5/10. Your feedback field will be sent DIRECTLY to the analysts for a second round — they will see your exact words and must address each point. Be specific: tell them what to verify, what data to check, what flaw to fix. This is a real back-and-forth debate, not a rubber stamp.
-REJECT: Fundamental logical flaw, or risk/reward clearly doesn't work — not worth another round.
+APPROVE: Weighted score ≥7.0, no red flags. The thesis is sound.
+SEND_BACK: Score 3-7, or any criterion <5. Your feedback is sent DIRECTLY to the analysts — they see your exact words IN THEIR CONVERSATION CONTEXT and must address each point. This is a real debate. Be specific: what to verify, what data to check, what flaw to fix. Use this generously — debate improves outcomes.
+REJECT: Score <3 ONLY. Fundamental logical flaw so severe that no amount of additional research can fix it. Use this rarely — most ideas deserve at least one round of debate.
 
-## CRITICAL: You must not be a yes-man.
-If you find yourself approving >60% of proposals, your threshold is too low. The best traders have high rejection rates.
+## CRITICAL: Prefer SEND_BACK over REJECT.
+A score of 4.5 is NOT a reject — it's a "send back with specific feedback." REJECT is reserved for ideas that are structurally broken (e.g. the market doesn't exist, the causal logic is backwards, the data is fabricated). If there's ANY chance additional research could improve the thesis, use SEND_BACK.
 
 ## No-Trade Default
 An empty portfolio is not a problem to solve. If no opportunities meet your criteria, the correct output is "no actionable trades." Your job is to protect capital, not deploy it.
@@ -65,6 +71,9 @@ An empty portfolio is not a problem to solve. If no opportunities meet your crit
 - **web_search**: Fact-check the analysts' claims. Search for news they may have missed.
 - **fetchWebPage**: Read primary sources if an analyst cites something you want to verify.
 - **runSimulation**: Run your own expected value or risk calculations to validate the analysts' sizing.
+
+## When reviewing a second round
+If you sent back feedback and the analysts responded, evaluate WHETHER THEY ACTUALLY ADDRESSED YOUR CONCERNS. Did they bring new evidence? Did they run the simulation you asked for? Did they check the data source you pointed out? Or did they just restate their position? If they genuinely addressed your concerns, you can raise the score. If they didn't, maintain or lower it.
 
 ## Context
 You also see the portfolio's recent trade history. Factor in:
@@ -97,125 +106,125 @@ ${JSON.stringify(
 Produce your independent analysis.`;
 }
 
-export async function runJury(
+// Max rounds of evaluator↔analyst debate per candidate
+const MAX_DEBATE_ROUNDS = 3;
+
+type Message = { role: 'system' | 'user' | 'assistant'; content: string; providerOptions?: any };
+
+export async function runJuryWithDebate(
   candidate: DiscoveryCandidate & { id: string; discoveredAt: string },
   ctx: DiscoveryContext,
-  evaluatorFeedback?: string,
-): Promise<JuryResult> {
+): Promise<{ juryResult: JuryResult; verdict: EvaluatorVerdict }> {
   const startTime = Date.now();
   const roles = ['analystA', 'analystB', 'analystC'] as const;
-  let prompt = buildAnalystPrompt(candidate, ctx);
+  const candidatePrompt = buildAnalystPrompt(candidate, ctx);
 
-  if (evaluatorFeedback) {
-    prompt += `\n\n## EVALUATOR FEEDBACK FROM PREVIOUS ROUND
-The evaluator reviewed this trade and sent it back. Address these specific concerns:
+  // Each analyst maintains its own message history across rounds
+  const analystHistories: Message[][] = roles.map(role => [
+    ...cachedSystemPrompt(ANALYST_PROMPT, getProviderName(role)),
+    { role: 'user' as const, content: candidatePrompt },
+  ]);
 
-${evaluatorFeedback}
+  // Evaluator maintains its message history across rounds
+  const evaluatorHistory: Message[] = [
+    ...cachedSystemPrompt(EVALUATOR_PROMPT, getProviderName('evaluator')),
+  ];
 
-You must directly address each point. If the evaluator is right, change your recommendation. If you disagree, explain why with evidence.`;
-  }
+  let juryResult: JuryResult | null = null;
+  let verdict: EvaluatorVerdict | null = null;
 
-  // Run all 3 analysts in parallel
-  const results = await Promise.allSettled(
-    roles.map(role =>
-      withRetry(
-        () => generateText({
-          model: getModel(role),
-          providerOptions: mergeProviderOptions(getProviderOptions(role), getCacheProviderOptions(role, getProviderName(role))),
-          output: Output.object({ schema: z.object({ analysis: JuryAnalysisSchema }) }),
-          tools: analystToolset(role),
-          stopWhen: stepCountIs(100),
-          messages: [
-            ...cachedSystemPrompt(ANALYST_PROMPT, getProviderName(role)),
-            { role: 'user' as const, content: prompt },
-          ],
-        }),
-        { label: `jury-${role}`, maxAttempts: 2 },
+  for (let round = 0; round < MAX_DEBATE_ROUNDS; round++) {
+    const isFirstRound = round === 0;
+    log({ level: 'info', event: 'debate_round', data: { round: round + 1, ticker: candidate.ticker } });
+
+    // --- Run all 3 analysts in parallel (continuing their conversations) ---
+    const analystResults = await Promise.allSettled(
+      roles.map((role, i) =>
+        withRetry(
+          () => generateText({
+            model: getModel(role),
+            providerOptions: mergeProviderOptions(getProviderOptions(role), getCacheProviderOptions(role, getProviderName(role))),
+            output: Output.object({ schema: z.object({ analysis: JuryAnalysisSchema }) }),
+            tools: analystToolset(role),
+            stopWhen: stepCountIs(100),
+            messages: analystHistories[i],
+          }),
+          { label: `jury-${role}-r${round}`, maxAttempts: 2 },
+        )
       )
-    )
-  );
+    );
 
-  const analyses: JuryAnalysis[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i];
-    if (r.status === 'fulfilled' && r.value.output?.analysis) {
-      analyses.push(r.value.output.analysis);
-      logLLMCall({
-        cycleId: `jury-${candidate.id}-${roles[i]}`,
-        model: getModelLabel(roles[i] as any),
-        systemPrompt: ANALYST_PROMPT,
-        userPrompt: prompt,
-        response: r.value.output,
-        usage: r.value.usage ? {
-          promptTokens: r.value.usage.inputTokens ?? 0,
-          completionTokens: r.value.usage.outputTokens ?? 0,
-        } : undefined,
-        durationMs: Date.now() - startTime,
-        candidateCount: r.value.output.analysis.direction !== 'no-trade' ? 1 : 0,
-        toolCalls: extractToolCalls(r.value),
-      });
-    } else {
-      log({ level: 'warn', event: 'jury_analyst_failed', data: { role: roles[i], error: String(r.status === 'rejected' ? r.reason : 'no output') } });
+    const analyses: JuryAnalysis[] = [];
+    for (let i = 0; i < analystResults.length; i++) {
+      const r = analystResults[i];
+      if (r.status === 'fulfilled' && r.value.output?.analysis) {
+        analyses.push(r.value.output.analysis);
+        // Append assistant response to this analyst's history
+        analystHistories[i].push({
+          role: 'assistant' as const,
+          content: JSON.stringify(r.value.output.analysis),
+        });
+        logLLMCall({
+          cycleId: `jury-${candidate.id}-${roles[i]}-r${round}`,
+          model: getModelLabel(roles[i] as any),
+          systemPrompt: ANALYST_PROMPT,
+          userPrompt: analystHistories[i].filter(m => m.role === 'user').map(m => typeof m.content === 'string' ? m.content : '').join('\n---\n'),
+          response: r.value.output,
+          toolCalls: extractToolCalls(r.value),
+          usage: r.value.usage ? { promptTokens: r.value.usage.inputTokens ?? 0, completionTokens: r.value.usage.outputTokens ?? 0 } : undefined,
+          durationMs: Date.now() - startTime,
+          candidateCount: r.value.output.analysis.direction !== 'no-trade' ? 1 : 0,
+        });
+      } else {
+        log({ level: 'warn', event: 'jury_analyst_failed', data: { role: roles[i], round, error: String(r.status === 'rejected' ? r.reason : 'no output') } });
+      }
     }
-  }
 
-  if (analyses.length === 0) {
-    return {
-      ticker: candidate.ticker,
-      analyses: [],
-      agreement: 'split',
-      consensusDirection: 'no-trade',
-      avgConviction: 0,
-    };
-  }
+    if (analyses.length === 0) {
+      return {
+        juryResult: { ticker: candidate.ticker, analyses: [], agreement: 'split', consensusDirection: 'no-trade', avgConviction: 0 },
+        verdict: { decision: 'REJECT', grades: { thesisQuality: 0, falsificationSpecificity: 0, informationCompleteness: 0, riskReward: 0, edgeDecay: 0 }, weightedScore: 0, reasoning: 'All analysts failed to produce output' },
+      };
+    }
 
-  // Aggregate
-  const directions = analyses.map(a => a.direction);
-  const convictions = analyses.map(a => a.conviction);
-  const avgConviction = convictions.reduce((a, b) => a + b, 0) / convictions.length;
+    // --- Aggregate jury ---
+    const directions = analyses.map(a => a.direction);
+    const convictions = analyses.map(a => a.conviction);
+    const avgConviction = convictions.reduce((a, b) => a + b, 0) / convictions.length;
+    const directionCounts: Record<string, number> = {};
+    for (const d of directions) directionCounts[d] = (directionCounts[d] ?? 0) + 1;
+    const topDirection = Object.entries(directionCounts).sort((a, b) => b[1] - a[1])[0];
 
-  const directionCounts: Record<string, number> = {};
-  for (const d of directions) directionCounts[d] = (directionCounts[d] ?? 0) + 1;
-  const topDirection = Object.entries(directionCounts).sort((a, b) => b[1] - a[1])[0];
+    let agreement: 'unanimous' | 'majority' | 'split';
+    if (new Set(directions).size === 1) agreement = 'unanimous';
+    else if (topDirection[1] >= 2) agreement = 'majority';
+    else agreement = 'split';
 
-  let agreement: 'unanimous' | 'majority' | 'split';
-  if (new Set(directions).size === 1) agreement = 'unanimous';
-  else if (topDirection[1] >= 2) agreement = 'majority';
-  else agreement = 'split';
+    const consensusDirection = topDirection[0] as 'long' | 'short' | 'no-trade';
+    const dissenter = agreement === 'majority' ? analyses.find(a => a.direction !== consensusDirection) : undefined;
 
-  const consensusDirection = topDirection[0] as 'long' | 'short' | 'no-trade';
+    juryResult = { ticker: candidate.ticker, analyses, agreement, consensusDirection, avgConviction, dissent: dissenter?.reasoningChain };
 
-  // Extract dissent
-  let dissent: string | undefined;
-  if (agreement === 'majority') {
-    const dissenter = analyses.find(a => a.direction !== consensusDirection);
-    if (dissenter) dissent = dissenter.reasoningChain;
-  }
+    log({ level: 'info', event: 'jury_complete', data: { ticker: candidate.ticker, round: round + 1, agreement, consensusDirection, avgConviction } });
 
-  log({
-    level: 'info',
-    event: 'jury_complete',
-    data: { ticker: candidate.ticker, agreement, consensusDirection, avgConviction, analyseCount: analyses.length },
-  });
+    if (consensusDirection === 'no-trade') {
+      return {
+        juryResult,
+        verdict: { decision: 'REJECT', grades: { thesisQuality: 0, falsificationSpecificity: 0, informationCompleteness: 0, riskReward: 0, edgeDecay: 0 }, weightedScore: 0, reasoning: 'Jury consensus: no-trade' },
+      };
+    }
 
-  return { ticker: candidate.ticker, analyses, agreement, consensusDirection, avgConviction, dissent };
-}
+    // --- Run evaluator (continuing its conversation) ---
+    const recentDecisions = readTradeDecisions(10);
+    const activeTheses = getActiveTheses();
 
-export async function runEvaluator(
-  juryResult: JuryResult,
-  candidate: DiscoveryCandidate & { id: string; discoveredAt: string },
-): Promise<EvaluatorVerdict> {
-  const startTime = Date.now();
-  const recentDecisions = readTradeDecisions(10);
-  const activeTheses = getActiveTheses();
-
-  const prompt = `## Jury Result
-Agreement: ${juryResult.agreement}
-Consensus: ${juryResult.consensusDirection}
-Average Conviction: ${juryResult.avgConviction}
+    const evaluatorUserMsg = `## ${isFirstRound ? 'Jury Result' : `Jury Response (Round ${round + 1})`}
+Agreement: ${agreement}
+Consensus: ${consensusDirection}
+Average Conviction: ${avgConviction.toFixed(1)}
 
 ## Individual Analyst Outputs (identities hidden)
-${juryResult.analyses.map((a, i) => `### Analyst ${i + 1}
+${analyses.map((a, i) => `### Analyst ${i + 1}
 Direction: ${a.direction} | Conviction: ${a.conviction}/10
 Thesis: ${a.thesis}
 Falsification: ${a.falsificationConditions.join('; ')}
@@ -224,64 +233,83 @@ Size: ${a.positionSizeRecommendation} | Leverage: ${a.leverageRecommendation}x
 Reasoning: ${a.reasoningChain}
 `).join('\n')}
 
-${juryResult.dissent ? `## Dissenting View\n${juryResult.dissent}` : ''}
+${dissenter ? `## Dissenting View\n${dissenter.reasoningChain}` : ''}
 
-## Current Portfolio
+${isFirstRound ? `## Current Portfolio
 Active theses: ${activeTheses.length}
 ${activeTheses.map(t => `- ${t.ticker} ${t.direction} (conviction ${t.conviction})`).join('\n') || 'None'}
 
 ## Recent Trade History
-${recentDecisions.slice(-5).map(d => `- ${d.ticker} ${d.action} ${d.direction ?? ''} → ${d.outcome ? `PnL: $${d.outcome.pnl}` : 'open'}`).join('\n') || 'No recent trades'}
+${recentDecisions.slice(-5).map(d => `- ${d.ticker} ${d.action} ${d.direction ?? ''} → ${d.outcome ? `PnL: $${d.outcome.pnl}` : 'open'}`).join('\n') || 'No recent trades'}` : ''}
 
-Grade this proposal and render your verdict.`;
+${!isFirstRound ? 'The analysts have responded to your previous feedback. Evaluate whether they ACTUALLY addressed your concerns with new evidence, or just restated their position.' : 'Grade this proposal and render your verdict.'}`;
 
-  const result = await withRetry(
-    () => generateText({
-      model: getModel('evaluator'),
-      providerOptions: mergeProviderOptions(getProviderOptions('evaluator'), getCacheProviderOptions('evaluator', getProviderName('evaluator'))),
-      output: Output.object({ schema: EvaluatorVerdictSchema }),
-      tools: evaluatorToolset,
-      stopWhen: stepCountIs(100),
-      messages: [
-        ...cachedSystemPrompt(EVALUATOR_PROMPT, getProviderName('evaluator')),
-        { role: 'user' as const, content: prompt },
-      ],
-    }),
-    { label: 'evaluator-llm', maxAttempts: 2 },
-  );
+    evaluatorHistory.push({ role: 'user' as const, content: evaluatorUserMsg });
 
-  const durationMs = Date.now() - startTime;
-  const verdict = result.output;
-  if (!verdict) {
-    log({ level: 'error', event: 'evaluator_no_output', data: { ticker: juryResult.ticker } });
-    return { decision: 'REJECT' as const, grades: { thesisQuality: 0, falsificationSpecificity: 0, informationCompleteness: 0, riskReward: 0, edgeDecay: 0 }, weightedScore: 0, reasoning: 'Evaluator failed to produce structured output — defaulting to REJECT' };
+    const evalResult = await withRetry(
+      () => generateText({
+        model: getModel('evaluator'),
+        providerOptions: mergeProviderOptions(getProviderOptions('evaluator'), getCacheProviderOptions('evaluator', getProviderName('evaluator'))),
+        output: Output.object({ schema: EvaluatorVerdictSchema }),
+        tools: evaluatorToolset,
+        stopWhen: stepCountIs(100),
+        messages: evaluatorHistory,
+      }),
+      { label: `evaluator-r${round}`, maxAttempts: 2 },
+    );
+
+    verdict = evalResult.output ?? null;
+    if (!verdict) {
+      log({ level: 'error', event: 'evaluator_no_output', data: { ticker: candidate.ticker, round } });
+      verdict = { decision: 'REJECT', grades: { thesisQuality: 0, falsificationSpecificity: 0, informationCompleteness: 0, riskReward: 0, edgeDecay: 0 }, weightedScore: 0, reasoning: 'Evaluator failed to produce output' };
+    }
+
+    // Append evaluator's response to its history
+    evaluatorHistory.push({ role: 'assistant' as const, content: JSON.stringify(verdict) });
+
+    logLLMCall({
+      cycleId: `evaluator-${candidate.id}-r${round}`,
+      model: getModelLabel('evaluator'),
+      systemPrompt: EVALUATOR_PROMPT,
+      userPrompt: evaluatorUserMsg,
+      response: verdict,
+      toolCalls: extractToolCalls(evalResult),
+      usage: evalResult.usage ? { promptTokens: evalResult.usage.inputTokens ?? 0, completionTokens: evalResult.usage.outputTokens ?? 0 } : undefined,
+      durationMs: Date.now() - startTime,
+      candidateCount: verdict.decision === 'APPROVE' ? 1 : 0,
+    });
+
+    log({
+      level: 'info',
+      event: 'evaluator_verdict',
+      data: { ticker: candidate.ticker, round: round + 1, decision: verdict.decision, score: verdict.weightedScore },
+    });
+
+    // If APPROVE or REJECT, we're done
+    if (verdict.decision === 'APPROVE' || verdict.decision === 'REJECT') {
+      break;
+    }
+
+    // SEND_BACK: append evaluator feedback to each analyst's conversation
+    if (verdict.decision === 'SEND_BACK' && verdict.feedback) {
+      const feedbackMsg = `## EVALUATOR FEEDBACK (Round ${round + 1})
+
+The evaluator reviewed your analysis and is sending it back. You MUST address each specific concern:
+
+${verdict.feedback}
+
+Weighted score: ${verdict.weightedScore}/10
+Grades: Thesis ${verdict.grades.thesisQuality}/10, Falsification ${verdict.grades.falsificationSpecificity}/10, Completeness ${verdict.grades.informationCompleteness}/10, Risk/Reward ${verdict.grades.riskReward}/10, Edge Decay ${verdict.grades.edgeDecay}/10
+
+Respond with an UPDATED analysis. Use tools to verify or refute each point. If the evaluator is right about a flaw, change your recommendation. If you disagree, provide NEW EVIDENCE.`;
+
+      for (const history of analystHistories) {
+        history.push({ role: 'user' as const, content: feedbackMsg });
+      }
+
+      log({ level: 'info', event: 'evaluator_send_back', data: { ticker: candidate.ticker, round: round + 1, feedback: verdict.feedback.slice(0, 200) } });
+    }
   }
 
-  logLLMCall({
-    cycleId: `evaluator-${candidate.id}`,
-    model: getModelLabel('evaluator'),
-    systemPrompt: EVALUATOR_PROMPT,
-    userPrompt: prompt,
-    response: verdict,
-    usage: result.usage ? {
-      promptTokens: result.usage.inputTokens ?? 0,
-      completionTokens: result.usage.outputTokens ?? 0,
-    } : undefined,
-    durationMs,
-    candidateCount: verdict.decision === 'APPROVE' ? 1 : 0,
-    toolCalls: extractToolCalls(result),
-  });
-
-  log({
-    level: 'info',
-    event: 'evaluator_verdict',
-    data: {
-      ticker: juryResult.ticker,
-      decision: verdict.decision,
-      weightedScore: verdict.weightedScore,
-      grades: verdict.grades,
-    },
-  });
-
-  return verdict;
+  return { juryResult: juryResult!, verdict: verdict! };
 }

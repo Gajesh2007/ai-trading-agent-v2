@@ -2,7 +2,7 @@ import { config } from './config.js';
 import { assembleDiscoveryContext } from './context/context-bus.js';
 import { runDiscoveryScanner } from './agents/discovery.js';
 import { generateThesis } from './agents/synthesis.js';
-import { runJury, runEvaluator } from './agents/jury.js';
+import { runJuryWithDebate } from './agents/jury.js';
 import { validateThesis, evaluateExit } from './agents/monitor.js';
 import { generateMetaReport } from './agents/meta-analysis.js';
 import { spawnInvestigationSubagent, spawnDevilsAdvocate } from './agents/subagents.js';
@@ -185,77 +185,16 @@ async function discoveryLoop(): Promise<void> {
           }
           result.synthesisResult = 'trade';
 
-          // Jury
-          const juryResult = await runJury(candidate, ctx);
+          // Jury + Evaluator debate (multi-round, same conversation context)
+          const { juryResult, verdict } = await runJuryWithDebate(candidate, ctx);
           result.juryAgreement = juryResult.agreement;
           result.juryConviction = juryResult.avgConviction;
-
-          if (juryResult.consensusDirection === 'no-trade') {
-            log({ level: 'info', event: 'jury_no_trade', data: { ticker: candidate.ticker } });
-            result.noTradeReason = 'Jury consensus: no-trade';
-            addRejection({
-              ticker: candidate.ticker, direction: candidate.direction,
-              evaluatorScore: 0, evaluatorReasoning: 'Jury consensus: no-trade',
-              stage: 'jury', rejectedAt: new Date().toISOString(),
-            });
-            candidateResults.push(result);
-            continue;
-          }
-
-          // Devil's advocate on split
-          if (juryResult.agreement === 'split') {
-            log({ level: 'info', event: 'jury_split_spawning_advocate', data: { ticker: candidate.ticker } });
-            const advocate = await spawnDevilsAdvocate(
-              juryResult.analyses.map(a => ({ direction: a.direction, conviction: a.conviction, reasoningChain: a.reasoningChain }))
-            );
-            if (!advocate || advocate.resolution.direction === 'no-trade' || advocate.resolution.conviction < 7) {
-              log({ level: 'info', event: 'devils_advocate_no_trade', data: { ticker: candidate.ticker } });
-              result.noTradeReason = "Devil's advocate: no-trade";
-              addRejection({
-                ticker: candidate.ticker, direction: candidate.direction,
-                evaluatorScore: 0, evaluatorReasoning: "Devil's advocate: no-trade",
-                stage: 'jury', rejectedAt: new Date().toISOString(),
-                });
-              candidateResults.push(result);
-              continue;
-            }
-            juryResult.consensusDirection = advocate.resolution.direction as 'long' | 'short';
-            juryResult.avgConviction = advocate.resolution.conviction;
-            juryResult.agreement = 'majority';
-            result.juryAgreement = 'split→advocate';
-            result.juryConviction = advocate.resolution.conviction;
-          }
-
-          // Size multiplier from jury agreement
-          let sizeMultiplier = 1.0;
-          if (juryResult.agreement === 'unanimous' && juryResult.avgConviction >= 7) {
-            sizeMultiplier = 1.0;
-          } else if (juryResult.agreement === 'unanimous') {
-            sizeMultiplier = 0.6;
-          } else if (juryResult.agreement === 'majority') {
-            sizeMultiplier = 0.5;
-          }
-
-          // Evaluator (with SEND_BACK retry)
-          let verdict = await runEvaluator(juryResult, candidate);
-
-          if (verdict.decision === 'SEND_BACK' && verdict.feedback) {
-            log({ level: 'info', event: 'evaluator_send_back', data: { ticker: candidate.ticker, feedback: verdict.feedback } });
-            // Re-run jury WITH the evaluator's feedback — real back-and-forth
-            const retryResult = await runJury(candidate, ctx, verdict.feedback);
-            if (retryResult.consensusDirection !== 'no-trade' && retryResult.agreement !== 'split') {
-              verdict = await runEvaluator(retryResult, candidate);
-            } else {
-              verdict = { ...verdict, decision: 'REJECT' as const };
-            }
-          }
-
           result.evaluatorDecision = verdict.decision;
           result.evaluatorScore = verdict.weightedScore;
 
           await notify('evaluator_verdict',
             `${verdict.decision}: ${candidate.ticker} ${juryResult.consensusDirection}`,
-            `Score: ${verdict.weightedScore}/10 | Size mult: ${sizeMultiplier}x\n${verdict.reasoning}`,
+            `Score: ${verdict.weightedScore}/10\n${verdict.reasoning}`,
           );
 
           if (verdict.decision !== 'APPROVE') {
@@ -271,7 +210,16 @@ async function discoveryLoop(): Promise<void> {
             continue;
           }
 
-          // Apply size multiplier
+          // Size multiplier from jury agreement
+          let sizeMultiplier = 1.0;
+          if (juryResult.agreement === 'unanimous' && juryResult.avgConviction >= 7) {
+            sizeMultiplier = 1.0;
+          } else if (juryResult.agreement === 'unanimous') {
+            sizeMultiplier = 0.6;
+          } else if (juryResult.agreement === 'majority') {
+            sizeMultiplier = 0.5;
+          }
+
           const adjustedThesis = {
             ...synthesis.thesis,
             positionSizeRecommendation: synthesis.thesis.positionSizeRecommendation * sizeMultiplier,
