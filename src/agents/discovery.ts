@@ -117,6 +117,13 @@ ${JSON.stringify(predEvents, null, 2)}
 
 ${ctx.errors.length > 0 ? `\n## Data Source Issues\n${ctx.errors.join('\n')}` : ''}
 
+${ctx.recentRejections.length > 0 ? `## Recently Rejected (DO NOT re-surface unless conditions materially changed)
+${[...new Map(ctx.recentRejections.map(r => [`${r.ticker}-${r.direction}`, r])).values()]
+  .map(r => `- ${r.ticker} ${r.direction} (score ${r.evaluatorScore}, ${r.stage}) — ${r.evaluatorReasoning.slice(0, 150)}`)
+  .join('\n')}
+
+These tickers+directions were recently evaluated and rejected. Only re-surface one if you have NEW information that wasn't available when it was rejected (e.g. prediction market odds shifted >10%, major news broke, fundamentals changed).
+` : ''}
 Analyze the above data${hasSignals ? ' and pre-processed signals' : ''}. Identify any divergences between prediction market odds and XYZ asset pricing. Return candidates or an empty array.`;
 }
 

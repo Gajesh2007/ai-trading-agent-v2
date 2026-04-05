@@ -18,6 +18,7 @@ import {
   writeCandidates, appendToHistory, ensureStateDir,
   addThesis, getActiveTheses, getOpenPositions, updatePosition, updateThesis,
   readSignalCache, appendCycleSummary,
+  addRejection, isRecentlyRejected, getRecentRejections,
 } from './state/manager.js';
 import { log, writeProgress } from './logger.js';
 
@@ -162,6 +163,12 @@ async function discoveryLoop(): Promise<void> {
           continue;
         }
 
+        // Skip recently rejected ticker+direction (6h cooldown)
+        if (isRecentlyRejected(candidate.ticker, candidate.direction)) {
+          log({ level: 'debug', event: 'candidate_skipped_recently_rejected', data: { ticker: candidate.ticker, direction: candidate.direction } });
+          continue;
+        }
+
         const result: typeof candidateResults[0] = {
           ticker: candidate.ticker,
           direction: candidate.direction,
@@ -173,6 +180,12 @@ async function discoveryLoop(): Promise<void> {
           const synthesis = await generateThesis(candidate, ctx);
           if (!synthesis.shouldTrade || !synthesis.thesis) {
             result.noTradeReason = synthesis.noTradeReason ?? 'Synthesis rejected';
+            addRejection({
+              ticker: candidate.ticker, direction: candidate.direction,
+              evaluatorScore: 0, evaluatorReasoning: result.noTradeReason,
+              stage: 'synthesis', rejectedAt: new Date().toISOString(),
+              expiresAt: new Date(Date.now() + 6 * 3600000).toISOString(),
+            });
             candidateResults.push(result);
             continue;
           }
@@ -186,6 +199,12 @@ async function discoveryLoop(): Promise<void> {
           if (juryResult.consensusDirection === 'no-trade') {
             log({ level: 'info', event: 'jury_no_trade', data: { ticker: candidate.ticker } });
             result.noTradeReason = 'Jury consensus: no-trade';
+            addRejection({
+              ticker: candidate.ticker, direction: candidate.direction,
+              evaluatorScore: 0, evaluatorReasoning: 'Jury consensus: no-trade',
+              stage: 'jury', rejectedAt: new Date().toISOString(),
+              expiresAt: new Date(Date.now() + 6 * 3600000).toISOString(),
+            });
             candidateResults.push(result);
             continue;
           }
@@ -199,6 +218,12 @@ async function discoveryLoop(): Promise<void> {
             if (!advocate || advocate.resolution.direction === 'no-trade' || advocate.resolution.conviction < 7) {
               log({ level: 'info', event: 'devils_advocate_no_trade', data: { ticker: candidate.ticker } });
               result.noTradeReason = "Devil's advocate: no-trade";
+              addRejection({
+                ticker: candidate.ticker, direction: candidate.direction,
+                evaluatorScore: 0, evaluatorReasoning: "Devil's advocate: no-trade",
+                stage: 'jury', rejectedAt: new Date().toISOString(),
+                expiresAt: new Date(Date.now() + 6 * 3600000).toISOString(),
+              });
               candidateResults.push(result);
               continue;
             }
@@ -243,6 +268,15 @@ async function discoveryLoop(): Promise<void> {
           if (verdict.decision !== 'APPROVE') {
             log({ level: 'info', event: 'trade_rejected', data: { ticker: candidate.ticker, decision: verdict.decision } });
             writeProgress(`REJECTED: ${candidate.ticker} ${juryResult.consensusDirection} (${verdict.decision}, score ${verdict.weightedScore})`);
+            // Cooldown scales with how bad the score was — worse score = longer cooldown
+            const cooldownHours = verdict.weightedScore < 4 ? 12 : verdict.weightedScore < 5 ? 6 : 3;
+            addRejection({
+              ticker: candidate.ticker, direction: candidate.direction,
+              evaluatorScore: verdict.weightedScore,
+              evaluatorReasoning: verdict.reasoning.slice(0, 500),
+              stage: 'evaluator', rejectedAt: new Date().toISOString(),
+              expiresAt: new Date(Date.now() + cooldownHours * 3600000).toISOString(),
+            });
             candidateResults.push(result);
             continue;
           }

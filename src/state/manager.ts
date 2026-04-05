@@ -229,3 +229,37 @@ export function appendCycleSummary(summary: {
 export function readCycleSummaries(limit = 50): unknown[] {
   return readJSONL('cycle-summaries.jsonl').slice(-limit);
 }
+
+// --- Rejection Registry (feeds back into discovery) ---
+
+export interface Rejection {
+  ticker: string;
+  direction: string;
+  evaluatorScore: number;
+  evaluatorReasoning: string;
+  stage: 'synthesis' | 'jury' | 'evaluator';
+  rejectedAt: string;
+  expiresAt: string; // Don't re-surface until this time unless conditions materially change
+}
+
+export function addRejection(rejection: Rejection): void {
+  appendJSONL('rejections.jsonl', rejection);
+}
+
+export function getRecentRejections(hoursBack = 24): Rejection[] {
+  const all = readJSONL<Rejection>('rejections.jsonl');
+  const cutoff = new Date(Date.now() - hoursBack * 3600000).toISOString();
+  return all.filter(r => r.rejectedAt > cutoff);
+}
+
+export function getRejectionsForTicker(ticker: string, direction: string): Rejection[] {
+  const all = readJSONL<Rejection>('rejections.jsonl');
+  return all.filter(r => r.ticker === ticker && r.direction === direction);
+}
+
+export function isRecentlyRejected(ticker: string, direction: string, cooldownHours = 6): boolean {
+  const rejections = getRejectionsForTicker(ticker, direction);
+  if (rejections.length === 0) return false;
+  const latest = rejections[rejections.length - 1];
+  return new Date(latest.expiresAt) > new Date();
+}

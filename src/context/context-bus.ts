@@ -2,7 +2,7 @@ import type { HLAsset, PredictionEvent } from '../schemas/discovery.js';
 import { fetchAllTradableAssets } from '../data-sources/hyperliquid.js';
 import { fetchPolymarketEvents } from '../data-sources/polymarket.js';
 import { fetchKalshiEvents } from '../data-sources/kalshi.js';
-import { readAllSignalCaches, getActiveTheses, getOpenPositions } from '../state/manager.js';
+import { readAllSignalCaches, getActiveTheses, getOpenPositions, getRecentRejections, type Rejection } from '../state/manager.js';
 import type { Thesis } from '../schemas/thesis.js';
 import type { Position } from '../schemas/position.js';
 import { log } from '../logger.js';
@@ -14,7 +14,8 @@ export interface DiscoveryContext {
   categories: Record<string, string>;
   kalshiEvents: PredictionEvent[];
   polymarketEvents: PredictionEvent[];
-  signals: Record<string, unknown>; // Pre-processed Layer 1 signals
+  signals: Record<string, unknown>;
+  recentRejections: Rejection[];
   fetchedAt: string;
   errors: string[];
 }
@@ -53,7 +54,9 @@ export async function assembleDiscoveryContext(): Promise<DiscoveryContext> {
     log({ level: 'warn', event: 'context_partial', data: { errors } });
   }
 
-  return { assets, categories, kalshiEvents, polymarketEvents, signals, fetchedAt: new Date().toISOString(), errors };
+  const recentRejections = getRecentRejections(24);
+
+  return { assets, categories, kalshiEvents, polymarketEvents, signals, recentRejections, fetchedAt: new Date().toISOString(), errors };
 }
 
 // --- Synthesis Context (Discovery Candidate → Thesis Generator) ---
