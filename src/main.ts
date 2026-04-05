@@ -249,7 +249,8 @@ async function discoveryLoop(): Promise<void> {
 
           if (verdict.decision === 'SEND_BACK' && verdict.feedback) {
             log({ level: 'info', event: 'evaluator_send_back', data: { ticker: candidate.ticker, feedback: verdict.feedback } });
-            const retryResult = await runJury(candidate, ctx);
+            // Re-run jury WITH the evaluator's feedback — real back-and-forth
+            const retryResult = await runJury(candidate, ctx, verdict.feedback);
             if (retryResult.consensusDirection !== 'no-trade' && retryResult.agreement !== 'split') {
               verdict = await runEvaluator(retryResult, candidate);
             } else {

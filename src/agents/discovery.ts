@@ -72,8 +72,11 @@ You receive pre-fetched data in the context, but you also have tools for deeper 
 - **refreshXYZAssets**: Get fresh price/funding/OI data for all XYZ DEX assets.
 - **getFundingRates**: Get predicted funding rates — extreme rates signal crowded positioning.
 - **searchPolymarket**: Search Polymarket by category for specific prediction market events.
+- **getRecentRejections**: Check what was recently rejected and WHY. ALWAYS call this before producing candidates. Do not re-surface a rejected ticker+direction unless you have genuinely new information.
+- **getPastDecisions**: Review past trade decisions and outcomes for calibration.
+- **getCycleSummaries**: See recent cycle results — how many candidates, what happened to each.
 
-Search the web for recent news on any ticker or event that looks promising. Check if a catalyst is real before flagging it as a candidate.`;
+IMPORTANT: Before producing ANY candidates, call getRecentRejections first. If a ticker+direction was rejected, explain what NEW information justifies re-evaluation.`;
 
 function buildUserPrompt(ctx: DiscoveryContext, cycleId: string): string {
   // Summarize assets by category, showing only those with meaningful volume
@@ -117,14 +120,7 @@ ${JSON.stringify(predEvents, null, 2)}
 
 ${ctx.errors.length > 0 ? `\n## Data Source Issues\n${ctx.errors.join('\n')}` : ''}
 
-${ctx.recentRejections.length > 0 ? `## Recently Rejected (DO NOT re-surface unless conditions materially changed)
-${[...new Map(ctx.recentRejections.map(r => [`${r.ticker}-${r.direction}`, r])).values()]
-  .map(r => `- ${r.ticker} ${r.direction} (score ${r.evaluatorScore}, ${r.stage}) — ${r.evaluatorReasoning.slice(0, 150)}`)
-  .join('\n')}
-
-These tickers+directions were recently evaluated and rejected. Only re-surface one if you have NEW information that wasn't available when it was rejected (e.g. prediction market odds shifted >10%, major news broke, fundamentals changed).
-` : ''}
-Analyze the above data${hasSignals ? ' and pre-processed signals' : ''}. Identify any divergences between prediction market odds and XYZ asset pricing. Return candidates or an empty array.`;
+Analyze the above data${hasSignals ? ' and pre-processed signals' : ''}. Before producing candidates, use getRecentRejections to check what was recently rejected and why. Do NOT re-surface rejected tickers unless you have new information. Return candidates or an empty array.`;
 }
 
 export async function runDiscoveryScanner(ctx: DiscoveryContext): Promise<DiscoveryOutput> {

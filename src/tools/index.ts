@@ -7,13 +7,14 @@ import { macroTools } from './macro.js';
 import { eventMappingTools } from './event-mapping.js';
 import { stopLossTools } from './stop-loss.js';
 import { builtinTools } from './builtin.js';
+import { historyTools } from './history.js';
 
 function getProviderForRole(role: string): string {
   const envPrefix = `MODEL_${role.toUpperCase()}`;
   return process.env[`${envPrefix}_PROVIDER`] ?? process.env.MODEL_PROVIDER ?? 'anthropic';
 }
 
-type ToolCategory = 'hl' | 'pred' | 'web' | 'portfolio' | 'sim' | 'macro' | 'eventMap' | 'stopLoss' | 'readFile' | 'grep' | 'bash';
+type ToolCategory = 'hl' | 'pred' | 'web' | 'portfolio' | 'sim' | 'macro' | 'eventMap' | 'stopLoss' | 'readFile' | 'grep' | 'bash' | 'history';
 
 function buildToolset(role: string, categories: ToolCategory[]) {
   const provider = getProviderForRole(role);
@@ -27,7 +28,7 @@ function buildToolset(role: string, categories: ToolCategory[]) {
   if (categories.includes('macro')) Object.assign(tools, macroTools);
   if (categories.includes('eventMap')) Object.assign(tools, eventMappingTools);
   if (categories.includes('stopLoss')) Object.assign(tools, stopLossTools);
-  // Built-in tools (scoped per role)
+  if (categories.includes('history')) Object.assign(tools, historyTools);
   if (categories.includes('readFile')) {
     tools.readFile = builtinTools.readFile;
     tools.listFiles = builtinTools.listFiles;
@@ -40,28 +41,28 @@ function buildToolset(role: string, categories: ToolCategory[]) {
 
 // --- Scoped toolsets per agent role ---
 
-/** Discovery: find opportunities (stays lean) */
-export const discoveryToolset = buildToolset('discovery', ['hl', 'pred', 'web', 'macro', 'eventMap']);
+/** Discovery: find opportunities + check rejection history */
+export const discoveryToolset = buildToolset('discovery', ['hl', 'pred', 'web', 'macro', 'eventMap', 'history']);
 
 /** Synthesis: generate thesis */
-export const synthesisToolset = buildToolset('synthesis', ['hl', 'pred', 'web', 'portfolio', 'sim', 'macro', 'eventMap', 'readFile']);
+export const synthesisToolset = buildToolset('synthesis', ['hl', 'pred', 'web', 'portfolio', 'sim', 'macro', 'eventMap', 'readFile', 'history']);
 
-/** Jury analysts: each gets provider-specific web tools + research tools */
+/** Jury analysts: research + history for calibration */
 export function analystToolset(role: 'analystA' | 'analystB' | 'analystC') {
-  return buildToolset(role, ['hl', 'pred', 'web', 'portfolio', 'sim', 'macro', 'eventMap', 'readFile', 'bash']);
+  return buildToolset(role, ['hl', 'pred', 'web', 'portfolio', 'sim', 'macro', 'eventMap', 'readFile', 'bash', 'history']);
 }
 
-/** Evaluator: reviews proposals + can dig into history */
-export const evaluatorToolset = buildToolset('evaluator', ['web', 'portfolio', 'sim', 'macro', 'readFile', 'grep', 'bash']);
+/** Evaluator: reviews proposals + full history access */
+export const evaluatorToolset = buildToolset('evaluator', ['web', 'portfolio', 'sim', 'macro', 'readFile', 'grep', 'bash', 'history']);
 
-/** Monitor: validate theses (stays fast — cheap model) */
+/** Monitor: validate theses */
 export const monitorToolset = buildToolset('thesisValidator', ['hl', 'pred', 'web', 'macro', 'readFile']);
 
-/** Exit evaluator: confirms exits + can research */
+/** Exit evaluator: confirms exits */
 export const exitEvaluatorToolset = buildToolset('exitEvaluator', ['hl', 'pred', 'web', 'macro', 'readFile']);
 
-/** Meta-analysis: full access to history */
-export const metaAnalysisToolset = buildToolset('metaAnalysis', ['web', 'portfolio', 'readFile', 'grep', 'bash']);
+/** Meta-analysis: full access to everything */
+export const metaAnalysisToolset = buildToolset('metaAnalysis', ['web', 'portfolio', 'readFile', 'grep', 'bash', 'history']);
 
 /** Executor: only gets stop-loss */
 export const executorToolset = buildToolset('discovery', ['hl', 'stopLoss']);

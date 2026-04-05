@@ -26,6 +26,8 @@ const ANALYST_PROMPT = `You are an independent analyst on a trading jury. You re
 - **searchPolymarket**: Verify prediction market odds independently.
 - **getPortfolioState**: Check current positions and exposure.
 - **getTradeHistory**: Review past trade outcomes for calibration.
+- **getRecentRejections**: Check what was recently rejected and why — avoid repeating failed theses.
+- **getPastDecisions**: See full decision history with outcomes.
 - **runSimulation**: Run Python code for quantitative analysis (expected value, Kelly criterion, etc.).`;
 
 const EVALUATOR_PROMPT = `You are a senior risk officer reviewing trade proposals from an analyst team. You are a SKEPTIC by nature. Your job is to find holes in their reasoning.
@@ -57,6 +59,9 @@ An empty portfolio is not a problem to solve. If no opportunities meet your crit
 ## Your Tools — verify the analysts' claims
 - **getPortfolioState**: Check current positions. Are we already exposed to this sector?
 - **getTradeHistory**: Has a similar thesis failed recently?
+- **getRecentRejections**: What did you reject before? Are the analysts making the same mistakes?
+- **getPastDecisions**: Full decision history with outcomes.
+- **getCycleSummaries**: See how recent cycles played out.
 - **web_search**: Fact-check the analysts' claims. Search for news they may have missed.
 - **fetchWebPage**: Read primary sources if an analyst cites something you want to verify.
 - **runSimulation**: Run your own expected value or risk calculations to validate the analysts' sizing.
@@ -95,10 +100,20 @@ Produce your independent analysis.`;
 export async function runJury(
   candidate: DiscoveryCandidate & { id: string; discoveredAt: string },
   ctx: DiscoveryContext,
+  evaluatorFeedback?: string,
 ): Promise<JuryResult> {
   const startTime = Date.now();
   const roles = ['analystA', 'analystB', 'analystC'] as const;
-  const prompt = buildAnalystPrompt(candidate, ctx);
+  let prompt = buildAnalystPrompt(candidate, ctx);
+
+  if (evaluatorFeedback) {
+    prompt += `\n\n## EVALUATOR FEEDBACK FROM PREVIOUS ROUND
+The evaluator reviewed this trade and sent it back. Address these specific concerns:
+
+${evaluatorFeedback}
+
+You must directly address each point. If the evaluator is right, change your recommendation. If you disagree, explain why with evidence.`;
+  }
 
   // Run all 3 analysts in parallel
   const results = await Promise.allSettled(
