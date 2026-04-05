@@ -29,24 +29,32 @@ function buildSystemPrompt(activeExchanges: string[]): string {
     universe += `
 ### Hyperliquid XYZ DEX (Perpetual Futures)
 Prefix tickers with "xyz:" — e.g. "xyz:NVDA", "xyz:GOLD", "xyz:SP500"
-Available assets include:
-- **Stocks**: xyz:NVDA, xyz:TSLA, xyz:AAPL, xyz:META, xyz:MSFT, xyz:GOOGL, xyz:AMD, xyz:AMZN, xyz:NFLX, xyz:PLTR, xyz:COIN, xyz:MSTR, xyz:INTC, xyz:HOOD, xyz:MU, xyz:RIVN, xyz:GME, xyz:BABA, xyz:TSM, xyz:ORCL, xyz:COST, xyz:LLY, etc.
+
+**CRITICAL: We ONLY trade equities and commodities. NO CRYPTO. Never propose crypto tokens (BTC, ETH, SOL, etc.).**
+
+Available assets — EQUITIES AND COMMODITIES ONLY:
+- **Stocks**: xyz:NVDA, xyz:TSLA, xyz:AAPL, xyz:META, xyz:MSFT, xyz:GOOGL, xyz:AMD, xyz:AMZN, xyz:NFLX, xyz:PLTR, xyz:INTC, xyz:HOOD, xyz:MU, xyz:RIVN, xyz:GME, xyz:BABA, xyz:TSM, xyz:ORCL, xyz:COST, xyz:LLY, etc.
 - **Commodities**: xyz:GOLD, xyz:SILVER, xyz:CL (crude), xyz:COPPER, xyz:NATGAS, xyz:PALLADIUM, xyz:PLATINUM, xyz:BRENTOIL, xyz:ALUMINIUM
 - **Indices**: xyz:SP500, xyz:VIX, xyz:XYZ100, xyz:JP225, xyz:KR200
 - **FX**: xyz:DXY, xyz:EUR, xyz:JPY
-Features: Up to 50x leverage, funding rates (signal crowded positioning), 24/7 trading.`;
+
+We PREFER leveraged positions. Use the leverage available on HL (up to 50x) to amplify conviction trades. Features: funding rates (signal crowded positioning), 24/7 trading.`;
   }
 
   if (hasPublic) {
     universe += `
-### Public.com (US Equities, Options, ETFs)
+### Public.com (US Equities, Options, Leveraged ETFs)
 Prefix tickers with "pub:" — e.g. "pub:NVDA", "pub:TQQQ", "pub:SPY"
+
+**CRITICAL: NO CRYPTO. Only equities, ETFs, options, and commodities. We PREFER leveraged products when we have conviction.**
+
 Available assets include:
 - **All US stocks**: Any NYSE/NASDAQ listed equity (NVDA, AAPL, TSLA, META, etc.)
-- **Leveraged ETFs**: pub:TQQQ (3x QQQ), pub:SOXL (3x semis), pub:UPRO (3x S&P), pub:TNA (3x small cap), pub:LABU (3x biotech), etc.
-- **Inverse ETFs**: pub:SQQQ (3x inverse QQQ), pub:SPXS (3x inverse S&P), pub:SOXS (3x inverse semis), etc.
-- **Options**: Calls and puts on any optionable stock — with Greeks (delta, gamma, theta, vega, IV)
+- **Leveraged ETFs (PREFERRED)**: pub:TQQQ (3x QQQ), pub:SOXL (3x semis), pub:UPRO (3x S&P), pub:TNA (3x small cap), pub:LABU (3x biotech), pub:FNGU (3x FANG+), pub:NUGT (3x gold miners), etc.
+- **Inverse ETFs (PREFERRED for bearish)**: pub:SQQQ (3x inverse QQQ), pub:SPXS (3x inverse S&P), pub:SOXS (3x inverse semis), pub:FNGD (3x inverse FANG+), pub:DUST (3x inverse gold miners), etc.
+- **Options**: Calls and puts on any optionable stock — with Greeks (delta, gamma, theta, vega, IV). Options provide built-in leverage.
 - **Sector ETFs**: pub:XLK (tech), pub:XLF (financials), pub:XLE (energy), pub:XLV (healthcare), etc.
+- **Commodity ETFs**: pub:GLD (gold), pub:SLV (silver), pub:USO (oil), pub:UNG (nat gas)
 Features: Spot equities, options (single-leg and multi-leg strategies), no funding rates, market hours + extended hours.`;
   }
 

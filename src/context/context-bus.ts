@@ -42,8 +42,13 @@ export async function assembleDiscoveryContext(): Promise<DiscoveryContext> {
   let categories: Record<string, string> = {};
 
   if (hasHL && hlResult.status === 'fulfilled' && hlResult.value) {
-    assets = hlResult.value.assets;
     categories = Object.fromEntries(hlResult.value.categories);
+    // Filter out crypto — we only trade equities, commodities, indices, FX
+    const allowedCategories = new Set(['Stocks', 'Commodities', 'Indices', 'FX', 'Pre-IPO']);
+    assets = hlResult.value.assets.filter((a: HLAsset) => {
+      const cat = categories[a.symbol];
+      return cat && allowedCategories.has(cat);
+    });
   } else if (hasHL && hlResult.status === 'rejected') {
     errors.push(`Hyperliquid: ${hlResult.reason}`);
   }
