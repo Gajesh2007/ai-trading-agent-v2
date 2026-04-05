@@ -31,7 +31,7 @@ export const EvaluatorVerdictSchema = z.object({
   weightedScore: z.number(),
   reasoning: z.string(),
   feedback: z.string().optional()
-    .describe('Specific feedback if SEND_BACK — what to investigate further'),
+    .describe('If SEND_BACK: sent DIRECTLY to analysts for re-run. Be specific — what to verify, what data to check, what flaw to address. They see your exact words.'),
   revisedConviction: z.number().describe('1-10 scale').optional()
     .describe('Evaluator\'s own conviction if different from jury'),
   revisedSize: z.number().optional()
