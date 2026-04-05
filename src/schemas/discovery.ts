@@ -37,11 +37,13 @@ export type PredictionEvent = z.infer<typeof PredictionEventSchema>;
 // --- Discovery candidate (LLM output) ---
 
 export const DiscoveryCandidateSchema = z.object({
-  ticker: z.string().describe('Hyperliquid perp symbol, e.g. "NVDA"'),
+  ticker: z.string().describe('Symbol with exchange prefix: "xyz:NVDA" for Hyperliquid perps, "pub:NVDA" for Public.com spot/options. Use "xyz:" for perps, "pub:" for spot/options.'),
   direction: z.enum(['long', 'short']),
   conviction: z.enum(['low', 'medium', 'high']),
   catalyst: z.string().describe('What event or signal drives this idea'),
   reasoning: z.string().describe('Full reasoning chain — why this is a trade'),
+  exchange: z.enum(['hyperliquid', 'public']).describe('Which exchange to trade on'),
+  instrument: z.enum(['perp', 'spot', 'option', 'etf']).default('perp').describe('What instrument type to use'),
   predictionMarketSignal: z.object({
     source: z.enum(['kalshi', 'polymarket']),
     eventTitle: z.string(),
@@ -50,9 +52,9 @@ export const DiscoveryCandidateSchema = z.object({
   }).optional().describe('The prediction market signal, if Path A discovery'),
   equityContext: z.object({
     currentPrice: z.string(),
-    fundingRate: z.string(),
+    fundingRate: z.string().optional(),
   }),
-  discoveryPath: z.enum(['prediction_market_first', 'catalyst_flow']),
+  discoveryPath: z.enum(['prediction_market_first', 'catalyst_flow', 'options_iv_divergence', 'leveraged_etf']),
   timeHorizon: z.string().describe('How long this edge might persist'),
 });
 

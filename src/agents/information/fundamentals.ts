@@ -39,7 +39,7 @@ export async function runFundamentalsAgent(): Promise<void> {
         providerOptions: mergeProviderOptions(getCacheProviderOptions('discovery', provider)),
         output: Output.object({ schema: FundamentalsSignalSchema }),
         tools: getWebToolsForProvider(provider),
-        stopWhen: stepCountIs(20),
+        stopWhen: stepCountIs(50),
         messages: [
           ...cachedSystemPrompt(PROMPT, provider),
           { role: 'user' as const, content: userPrompt },

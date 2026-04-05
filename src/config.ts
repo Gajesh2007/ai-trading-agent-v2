@@ -25,6 +25,14 @@ export const config = Object.freeze({
   KALSHI_API_KEY: envOptional('KALSHI_API_KEY'),
   KALSHI_PRIVATE_KEY_PEM: envOptional('KALSHI_PRIVATE_KEY_PEM'),
 
+  // Exchanges (comma-separated: "hyperliquid", "public", or "hyperliquid,public")
+  EXCHANGES: env('EXCHANGES', 'hyperliquid'),
+
+  // Public.com (optional)
+  PUBLIC_API_SECRET: envOptional('PUBLIC_API_SECRET'),
+  PUBLIC_ACCOUNT_ID: envOptional('PUBLIC_ACCOUNT_ID'),
+  PUBLIC_ENABLE_TRADING: env('PUBLIC_ENABLE_TRADING', 'false') === 'true',
+
   // Paper trading — real data, simulated execution
   PAPER_TRADING: env('PAPER_TRADING', 'true') === 'true',
   PAPER_STARTING_EQUITY: parseFloat(env('PAPER_STARTING_EQUITY', '200')),
@@ -32,9 +40,9 @@ export const config = Object.freeze({
   // Timing
   DISCOVERY_INTERVAL_MS: parseInt(env('DISCOVERY_INTERVAL_MS', '900000'), 10),
 
-  // Paths
-  STATE_DIR: join(process.cwd(), 'workspace', 'state'),
-  LOG_DIR: join(process.cwd(), 'logs'),
+  // Paths (configurable for multi-instance)
+  STATE_DIR: env('STATE_DIR', join(process.cwd(), 'workspace', 'state')),
+  LOG_DIR: env('LOG_DIR', join(process.cwd(), 'logs')),
 });
 
 /** Validates that the chosen model provider has an API key. Call before using the model. */

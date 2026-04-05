@@ -5,6 +5,9 @@
   "private": true,
   "scripts": {
     "start": "tsx src/main.ts",
+    "start:public": "DOTENV_CONFIG_PATH=.env.public tsx src/main.ts",
+    "start:hl": "EXCHANGES=hyperliquid tsx src/main.ts",
+    "start:both": "EXCHANGES=hyperliquid,public tsx src/main.ts",
     "dev": "tsx watch src/main.ts"
   },
   "dependencies": {

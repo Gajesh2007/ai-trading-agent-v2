@@ -11,6 +11,7 @@ import { runPredictionMarketsAgent } from './agents/information/prediction-marke
 import { runFundamentalsAgent } from './agents/information/fundamentals.js';
 import { runFlowPositioningAgent } from './agents/information/flow-positioning.js';
 import { runTechnicalContextAgent } from './agents/information/technical-context.js';
+import { runMarketScannerAgent } from './agents/information/market-scanner.js';
 import { executeOpen, executeClose, executeReduce, getAccountEquity, getHLPositions } from './execution/executor.js';
 import { checkCircuitBreaker, isPaused } from './execution/circuit-breaker.js';
 import { notify } from './execution/notifier.js';
@@ -21,6 +22,7 @@ import {
   addRejection, getRecentRejections,
 } from './state/manager.js';
 import { log, writeProgress } from './logger.js';
+import { initializeExchanges, getExchangeForTicker, getExchangeNames, getAllExchanges } from './exchanges/index.js';
 
 const DISCOVERY_INTERVAL = config.DISCOVERY_INTERVAL_MS;
 const LAYER1_INTERVAL = config.DISCOVERY_INTERVAL_MS;     // Layer 1 runs at same cadence as discovery
@@ -60,14 +62,19 @@ async function layer1Loop(): Promise<void> {
       log({ level: 'info', event: 'layer1_cycle_start' });
       writeProgress('Layer 1 information agents running');
 
-      // Run all 5 agents in parallel — cheap models, independent tasks
-      const results = await Promise.allSettled([
+      // Run info agents in parallel — skip exchange-specific ones based on active exchanges
+      const activeExchanges = getExchangeNames();
+      const hasHL = activeExchanges.includes('hyperliquid');
+      const hasPublic = activeExchanges.includes('public');
+      const agents: Promise<any>[] = [
         runMacroRegimeAgent(),
         runPredictionMarketsAgent(),
-        runFlowPositioningAgent(),
-        runTechnicalContextAgent(),
-        // Fundamentals uses web search heavily — run less frequently
-      ]);
+        // HL-specific: flow positioning and technical context need HL data
+        ...(hasHL ? [runFlowPositioningAgent(), runTechnicalContextAgent()] : []),
+        // Public.com-specific: market scanner screens the entire US equity universe
+        ...(hasPublic ? [runMarketScannerAgent()] : []),
+      ];
+      const results = await Promise.allSettled(agents);
 
       const failed = results.filter(r => r.status === 'rejected');
       if (failed.length > 0) {
@@ -235,7 +242,15 @@ async function discoveryLoop(): Promise<void> {
             `${adjustedThesis.thesis}\nSize: ${(adjustedThesis.positionSizeRecommendation * 100).toFixed(0)}% of $${effectiveEquity.toFixed(0)} | Leverage: ${adjustedThesis.leverageRecommendation}x | Agreement: ${juryResult.agreement}`,
           );
 
-          const position = await executeOpen(adjustedThesis, effectiveEquity);
+          // Route execution to the correct exchange based on ticker prefix
+          let position;
+          try {
+            const exchange = getExchangeForTicker(adjustedThesis.ticker);
+            position = await exchange.executeOpen(adjustedThesis, effectiveEquity);
+          } catch {
+            // Fallback to Hyperliquid executor for backward compat
+            position = await executeOpen(adjustedThesis, effectiveEquity);
+          }
 
           if (position) {
             result.executed = true;
@@ -285,9 +300,26 @@ async function monitoringLoop(): Promise<void> {
     if (localPositions.length === 0) continue;
 
     try {
-      // Sync with exchange
+      // Sync with exchanges — route each position to correct exchange
       const hlPositions = await getHLPositions();
       for (const localPos of localPositions) {
+        // Public.com positions: sync via adapter
+        if (localPos.ticker.startsWith('pub:')) {
+          try {
+            const exchange = getExchangeForTicker(localPos.ticker);
+            const exPositions = await exchange.getPositions();
+            const symbol = localPos.ticker.replace('pub:', '');
+            const exPos = exPositions.find(p => p.symbol === symbol);
+            if (exPos) {
+              await updatePosition(localPos.id, { unrealizedPnl: exPos.unrealizedPnl, currentPrice: exPos.currentPrice });
+            }
+          } catch (e) {
+            log({ level: 'warn', event: 'public_sync_failed', data: { ticker: localPos.ticker, error: String(e) } });
+          }
+          continue;
+        }
+
+        // Hyperliquid positions: existing logic
         const hlPos = hlPositions.find(p =>
           p.coin === localPos.ticker || p.coin === localPos.ticker.replace('xyz:', '')
         );
@@ -342,7 +374,8 @@ async function monitoringLoop(): Promise<void> {
             const unit = horizonMatch[2].toLowerCase();
             const maxHours = unit === 'hour' ? amount : unit === 'day' ? amount * 24 : amount * 168;
             if (hoursOpen > maxHours) {
-              await executeClose(position, `Time horizon expired (${thesis.timeHorizon})`);
+              try { const ex = getExchangeForTicker(position.ticker); await ex.executeClose(position, `Time horizon expired (${thesis.timeHorizon})`); }
+              catch { await executeClose(position, `Time horizon expired (${thesis.timeHorizon})`); }
               await updateThesis(thesis.id, { status: 'expired' });
               await notify('position_closed', `EXPIRED: ${position.ticker}`, `Time horizon: ${thesis.timeHorizon}`);
               writeProgress(`EXPIRED: ${position.ticker} after ${hoursOpen.toFixed(1)}h`);
@@ -369,7 +402,8 @@ async function monitoringLoop(): Promise<void> {
           const exitDecision = await evaluateExit(thesis, position, validation, ctx);
 
           if (exitDecision.action === 'EXIT') {
-            await executeClose(position, exitDecision.reasoning);
+            try { const ex = getExchangeForTicker(position.ticker); await ex.executeClose(position, exitDecision.reasoning); }
+            catch { await executeClose(position, exitDecision.reasoning); }
             await updateThesis(thesis.id, { status: 'invalidated' });
             await notify('position_closed',
               `EXIT: ${position.ticker} ${position.direction}`,
@@ -377,7 +411,8 @@ async function monitoringLoop(): Promise<void> {
             );
             writeProgress(`EXIT: ${position.ticker} — ${exitDecision.reasoning.slice(0, 100)}`);
           } else if (exitDecision.action === 'REDUCE' && exitDecision.reduceTo !== undefined) {
-            await executeReduce(position, exitDecision.reduceTo, exitDecision.reasoning);
+            try { const ex = getExchangeForTicker(position.ticker); await ex.executeReduce(position, exitDecision.reduceTo, exitDecision.reasoning); }
+            catch { await executeReduce(position, exitDecision.reduceTo, exitDecision.reasoning); }
             await notify('position_closed',
               `REDUCED: ${position.ticker} to ${(exitDecision.reduceTo * 100).toFixed(0)}%`,
               exitDecision.reasoning,
@@ -425,16 +460,34 @@ async function executionWatcherLoop(): Promise<void> {
       const openPositions = getOpenPositions();
       if (openPositions.length === 0) continue;
 
-      // Refresh P&L for all open positions
+      // Refresh P&L for all open positions (exchange-aware)
       const hlPositions = await getHLPositions();
       for (const pos of openPositions) {
+        // Public.com positions: refresh via adapter
+        if (pos.ticker.startsWith('pub:')) {
+          try {
+            const exchange = getExchangeForTicker(pos.ticker);
+            const price = await exchange.getCurrentPrice(pos.ticker.replace('pub:', ''));
+            const entryPrice = parseFloat(pos.entryPrice);
+            const pnlPct = pos.direction === 'long'
+              ? (price - entryPrice) / entryPrice
+              : (entryPrice - price) / entryPrice;
+            await updatePosition(pos.id, {
+              unrealizedPnl: (pos.sizeUSD * pnlPct).toFixed(2),
+              currentPrice: price.toString(),
+            });
+          } catch { /* price fetch failed — skip */ }
+          continue;
+        }
+
+        // Hyperliquid positions
         const hlPos = hlPositions.find(p =>
           p.coin === pos.ticker || p.coin === pos.ticker.replace('xyz:', '')
         );
         if (hlPos) {
           await updatePosition(pos.id, {
             unrealizedPnl: hlPos.unrealizedPnl,
-            currentPrice: hlPos.entryPx, // This is entry px; mark px comes from context
+            currentPrice: hlPos.entryPx,
           });
         }
       }
@@ -476,22 +529,26 @@ function sleep(ms: number): Promise<void> {
 async function main(): Promise<void> {
   ensureStateDir();
 
+  // Initialize exchange adapters before anything else
+  initializeExchanges();
+  const exchanges = getExchangeNames();
+
   const mode = config.PAPER_TRADING ? 'PAPER TRADING' : 'LIVE TRADING';
 
-  log({ level: 'info', event: 'startup', data: { mode, discoveryInterval: DISCOVERY_INTERVAL, model: `${config.MODEL_PROVIDER}/${config.MODEL_ID}` } });
-  writeProgress(`System started — ${mode}`);
+  log({ level: 'info', event: 'startup', data: { mode, exchanges, discoveryInterval: DISCOVERY_INTERVAL, model: `${config.MODEL_PROVIDER}/${config.MODEL_ID}` } });
+  writeProgress(`System started — ${mode} — Exchanges: ${exchanges.join(', ')}`);
 
   console.log(`
   Trading Agent Harness
   ---------------------
   Mode:       ${mode}
   Equity:     $${config.PAPER_TRADING ? config.PAPER_STARTING_EQUITY : '(live)'}
+  Exchanges:  ${exchanges.join(', ')}
   Layer 1:    every ${(LAYER1_INTERVAL / 60000).toFixed(0)} min (5 info agents → signal cache)
   Discovery:  every ${(DISCOVERY_INTERVAL / 60000).toFixed(0)} min (reads cached signals)
   Monitoring: every ${(MONITORING_INTERVAL / 60000).toFixed(0)} min (thesis validation)
   Exec Watch: every 30s (P&L refresh)
   Circuit:    every ${(CIRCUIT_CHECK_INTERVAL / 1000).toFixed(0)}s ($50 kill switch)
-  DEX:        XYZ (equities, commodities, indices, FX)
   Model:      ${config.MODEL_PROVIDER}/${config.MODEL_ID}
   `);
 

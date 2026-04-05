@@ -193,7 +193,7 @@ export function readSignalCache(agent: string): unknown | null {
 }
 
 export function readAllSignalCaches(): Record<string, unknown> {
-  const agents = ['macro-regime', 'prediction-markets', 'fundamentals', 'flow-positioning', 'technical-context'];
+  const agents = ['macro-regime', 'prediction-markets', 'fundamentals', 'flow-positioning', 'technical-context', 'market-scanner'];
   const result: Record<string, unknown> = {};
   for (const agent of agents) {
     const data = readSignalCache(agent);

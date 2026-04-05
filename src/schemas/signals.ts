@@ -75,8 +75,53 @@ export const TechnicalContextSignalSchema = z.object({
   updatedAt: z.string(),
 });
 
+// --- Market Scanner (Public.com universe screening) ---
+
+export const MarketScannerSignalSchema = z.object({
+  watchlist: z.array(z.object({
+    ticker: z.string().describe('Stock/ETF symbol, e.g. "NVDA"'),
+    reason: z.enum([
+      'unusual_options_activity',
+      'volume_anomaly',
+      'big_mover',
+      'earnings_proximity',
+      'sector_rotation',
+      'news_catalyst',
+      'iv_anomaly',
+      'prediction_market_linked',
+      'institutional_flow',
+      'technical_breakout',
+    ]),
+    details: z.string().describe('Why this ticker was flagged — be specific'),
+    urgency: z.enum(['watch', 'investigate', 'urgent']),
+    sector: z.string().optional(),
+    currentPrice: z.string().optional(),
+    dailyChangePercent: z.number().optional(),
+    volumeVsAvg: z.number().optional().describe('Volume as multiple of 20d average'),
+  })),
+  sectorHeatmap: z.array(z.object({
+    sector: z.string(),
+    etfSymbol: z.string(),
+    performance: z.enum(['strong_up', 'up', 'flat', 'down', 'strong_down']),
+    flowSignal: z.string().optional(),
+  })).optional(),
+  marketBreadth: z.object({
+    advancers: z.number().optional(),
+    decliners: z.number().optional(),
+    sentiment: z.enum(['bullish', 'bearish', 'mixed', 'neutral']),
+  }).optional(),
+  catalystCalendar: z.array(z.object({
+    ticker: z.string(),
+    event: z.string(),
+    date: z.string(),
+    daysUntil: z.number(),
+  })).optional(),
+  updatedAt: z.string(),
+});
+
 export type MacroRegimeSignal = z.infer<typeof MacroRegimeSignalSchema>;
 export type PredictionMarketSignal = z.infer<typeof PredictionMarketSignalSchema>;
 export type FundamentalsSignal = z.infer<typeof FundamentalsSignalSchema>;
 export type FlowPositioningSignal = z.infer<typeof FlowPositioningSignalSchema>;
 export type TechnicalContextSignal = z.infer<typeof TechnicalContextSignalSchema>;
+export type MarketScannerSignal = z.infer<typeof MarketScannerSignalSchema>;

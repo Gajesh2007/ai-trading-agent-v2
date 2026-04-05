@@ -39,7 +39,7 @@ export async function runMacroRegimeAgent(): Promise<void> {
       providerOptions: mergeProviderOptions(getCacheProviderOptions('discovery', getProviderName('discovery'))),
       output: Output.object({ schema: MacroRegimeSignalSchema }),
       tools: getWebToolsForProvider(provider),
-      stopWhen: stepCountIs(10),
+      stopWhen: stepCountIs(50),
       messages: [
         ...cachedSystemPrompt(PROMPT, getProviderName('discovery')),
         { role: 'user' as const, content: userPrompt },
