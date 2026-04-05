@@ -239,7 +239,6 @@ export interface Rejection {
   evaluatorReasoning: string;
   stage: 'synthesis' | 'jury' | 'evaluator';
   rejectedAt: string;
-  expiresAt: string; // Don't re-surface until this time unless conditions materially change
 }
 
 export function addRejection(rejection: Rejection): void {
@@ -255,11 +254,4 @@ export function getRecentRejections(hoursBack = 24): Rejection[] {
 export function getRejectionsForTicker(ticker: string, direction: string): Rejection[] {
   const all = readJSONL<Rejection>('rejections.jsonl');
   return all.filter(r => r.ticker === ticker && r.direction === direction);
-}
-
-export function isRecentlyRejected(ticker: string, direction: string, cooldownHours = 6): boolean {
-  const rejections = getRejectionsForTicker(ticker, direction);
-  if (rejections.length === 0) return false;
-  const latest = rejections[rejections.length - 1];
-  return new Date(latest.expiresAt) > new Date();
 }
