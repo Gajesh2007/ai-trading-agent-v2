@@ -30,9 +30,9 @@ function buildSystemPrompt(activeExchanges: string[]): string {
 ### Hyperliquid XYZ DEX (Perpetual Futures)
 Prefix tickers with "xyz:" — e.g. "xyz:NVDA", "xyz:GOLD", "xyz:SP500"
 
-**CRITICAL: We ONLY trade equities and commodities. NO CRYPTO. Never propose crypto tokens (BTC, ETH, SOL, etc.).**
+**CRITICAL: We ONLY trade equities, commodities, and indices. NO CRYPTO. NO PRE-IPO. Never propose crypto tokens or pre-IPO perps.**
 
-Available assets — EQUITIES AND COMMODITIES ONLY:
+Available assets — EQUITIES, COMMODITIES, AND INDICES ONLY:
 - **Stocks**: xyz:NVDA, xyz:TSLA, xyz:AAPL, xyz:META, xyz:MSFT, xyz:GOOGL, xyz:AMD, xyz:AMZN, xyz:NFLX, xyz:PLTR, xyz:INTC, xyz:HOOD, xyz:MU, xyz:RIVN, xyz:GME, xyz:BABA, xyz:TSM, xyz:ORCL, xyz:COST, xyz:LLY, etc.
 - **Commodities**: xyz:GOLD, xyz:SILVER, xyz:CL (crude), xyz:COPPER, xyz:NATGAS, xyz:PALLADIUM, xyz:PLATINUM, xyz:BRENTOIL, xyz:ALUMINIUM
 - **Indices**: xyz:SP500, xyz:VIX, xyz:XYZ100, xyz:JP225, xyz:KR200

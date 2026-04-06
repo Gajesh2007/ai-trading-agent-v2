@@ -44,10 +44,13 @@ export async function assembleDiscoveryContext(): Promise<DiscoveryContext> {
   if (hasHL && hlResult.status === 'fulfilled' && hlResult.value) {
     categories = Object.fromEntries(hlResult.value.categories);
     // Filter out crypto — we only trade equities, commodities, indices, FX
-    const allowedCategories = new Set(['Stocks', 'Commodities', 'Indices', 'FX', 'Pre-IPO']);
+    // Category names are case-insensitive; assets without a category are kept (XYZ DEX is mostly equities)
+    // Only keep: stocks, commodities, indices, FX. Block crypto and pre-IPO.
+    const blockedCategories = new Set(['crypto', 'defi', 'meme', 'l1', 'l2', 'gaming', 'nft', 'ai', 'preipo', 'pre-ipo']);
     assets = hlResult.value.assets.filter((a: HLAsset) => {
-      const cat = categories[a.symbol];
-      return cat && allowedCategories.has(cat);
+      const cat = categories[a.symbol]?.toLowerCase().replace(/[\s-]/g, '');
+      if (!cat) return true; // No category = keep (likely equity on XYZ DEX)
+      return !blockedCategories.has(cat);
     });
   } else if (hasHL && hlResult.status === 'rejected') {
     errors.push(`Hyperliquid: ${hlResult.reason}`);
