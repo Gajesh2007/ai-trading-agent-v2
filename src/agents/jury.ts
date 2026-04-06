@@ -290,21 +290,43 @@ ${!isFirstRound ? 'The analysts have responded to your previous feedback. Evalua
       break;
     }
 
-    // SEND_BACK: append evaluator feedback to each analyst's conversation
+    // SEND_BACK: append evaluator feedback + peer analyses to each analyst's conversation
+    // Each analyst sees: (1) what the other analysts found, (2) evaluator's critique
+    // This mirrors a real trading desk — analysts hear each other's arguments
     if (verdict.decision === 'SEND_BACK' && verdict.feedback) {
-      const feedbackMsg = `## EVALUATOR FEEDBACK (Round ${round + 1})
+      for (let i = 0; i < analystHistories.length; i++) {
+        // Build peer analysis summaries (everything except analyst i's own)
+        const peerSummaries = analyses
+          .map((a, j) => {
+            if (j === i) return null; // Skip own analysis
+            return `### Analyst ${j + 1} (${roles[j]})
+Direction: ${a.direction} | Conviction: ${a.conviction}/10
+Thesis: ${a.thesis}
+Key risks: ${a.keyRisks.join('; ')}
+Reasoning: ${a.reasoningChain}`;
+          })
+          .filter(Boolean)
+          .join('\n\n');
 
-The evaluator reviewed your analysis and is sending it back. You MUST address each specific concern:
+        const feedbackMsg = `## DEBATE ROUND ${round + 1} — EVALUATOR FEEDBACK + PEER ANALYSES
 
+### What your fellow analysts found (you did NOT see this before)
+${peerSummaries}
+
+### Evaluator's critique (addressed to ALL analysts)
 ${verdict.feedback}
 
 Weighted score: ${verdict.weightedScore}/10
 Grades: Thesis ${verdict.grades.thesisQuality}/10, Falsification ${verdict.grades.falsificationSpecificity}/10, Completeness ${verdict.grades.informationCompleteness}/10, Risk/Reward ${verdict.grades.riskReward}/10, Edge Decay ${verdict.grades.edgeDecay}/10
 
-Respond with an UPDATED analysis. Use tools to verify or refute each point. If the evaluator is right about a flaw, change your recommendation. If you disagree, provide NEW EVIDENCE.`;
+## Your task
+1. Address the evaluator's specific concerns with NEW evidence
+2. Consider your peers' findings — build on their research, challenge their conclusions, or incorporate their data
+3. If another analyst found something you missed, factor it in
+4. If you disagree with a peer's reasoning, explain why with evidence
+5. Update your recommendation. If the evidence warrants changing direction, change it.`;
 
-      for (const history of analystHistories) {
-        history.push({ role: 'user' as const, content: feedbackMsg });
+        analystHistories[i].push({ role: 'user' as const, content: feedbackMsg });
       }
 
       log({ level: 'info', event: 'evaluator_send_back', data: { ticker: candidate.ticker, round: round + 1, feedback: verdict.feedback.slice(0, 200) } });
