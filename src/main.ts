@@ -119,8 +119,8 @@ async function discoveryLoop(): Promise<void> {
       writeProgress('Discovery cycle started');
 
       const ctx = await assembleDiscoveryContext();
-      if (ctx.assets.length === 0) {
-        log({ level: 'error', event: 'discovery_abort', data: { reason: 'No assets fetched' } });
+      if (ctx.assets.length === 0 && ctx.exchangeAssets.length === 0) {
+        log({ level: 'error', event: 'discovery_abort', data: { reason: 'No assets fetched from any exchange' } });
         await sleep(DISCOVERY_INTERVAL);
         continue;
       }
