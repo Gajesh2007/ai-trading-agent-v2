@@ -1,6 +1,6 @@
 # AI Trading Agent
 
-A fully autonomous multi-model trading harness that discovers, evaluates, and executes trades on [Hyperliquid](https://hyperliquid.xyz) perpetual futures by finding divergences between prediction market odds and asset pricing.
+A fully autonomous multi-model trading harness that discovers, evaluates, and executes trades across [Hyperliquid](https://hyperliquid.xyz) perpetual futures and [Public.com](https://public.com) US equities/options by finding divergences between prediction market odds and asset pricing.
 
 ## Architecture
 
